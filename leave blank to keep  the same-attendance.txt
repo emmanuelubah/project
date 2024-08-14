@@ -1,0 +1,5 @@
+Attendees:
+jone,emmanuel,joy,samule
+
+Presence:
+jone,emmanuel,joy,samule: false
