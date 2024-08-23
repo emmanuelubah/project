@@ -1,7 +1,5 @@
 import 'dart:io';
-import 'package:args/args.dart';
 
-// Event class
 class Event {
   String title;
   DateTime date;
@@ -23,11 +21,12 @@ class Event {
   }
 }
 
-// Attendance class
+enum AttendanceStatus { present, absent }
+
 class Attendance {
   String eventTitle;
   List<String> attendees;
-  Map<String, bool> presence;
+  Map<String, AttendanceStatus> presence;
 
   Attendance({
     required this.eventTitle,
@@ -36,7 +35,6 @@ class Attendance {
   });
 }
 
-// Scheduler class
 class Scheduler {
   List<Event> events;
 
@@ -54,7 +52,7 @@ class Scheduler {
 
   bool hasConflict(Event newEvent) {
     return events.any((event) =>
-      event.date == newEvent.date && event.time == newEvent.time);
+        event.date == newEvent.date && event.time == newEvent.time);
   }
 
   List<Event> getEventsInChronologicalOrder() {
@@ -62,7 +60,6 @@ class Scheduler {
   }
 }
 
-// Storage class
 class Storage {
   final String filePath;
 
@@ -71,7 +68,7 @@ class Storage {
   Future<void> saveEvents(List<Event> events) async {
     File file = File(filePath);
     String content = events.map((event) =>
-        '${event.title},${event.date},${event.time},${event.location},${event.description}'
+        '${event.title},${event.date.toIso8601String()},${event.time},${event.location},${event.description}'
     ).join('\n');
     await file.writeAsString(content);
   }
@@ -96,22 +93,24 @@ class Storage {
   }
 
   Future<void> saveAttendance(String eventTitle, Attendance attendance) async {
-    File file = File('$eventTitle-attendance.txt');
-    String content = 'Attendees:\n${attendance.attendees.join('\n')}\n\nPresence:\n${attendance.presence.entries.map((e) => '${e.key}: ${e.value}').join('\n')}';
+    File file = File('${sanitizeFileName(eventTitle)}-attendance.txt');
+    String content = 'Attendees:\n${attendance.attendees.join('\n')}\n\nPresence:\n${attendance.presence.entries.map((e) => '${e.key}: ${e.value.name}').join('\n')}';
     await file.writeAsString(content);
   }
 
   Future<Attendance> loadAttendance(String eventTitle) async {
-    File file = File('$eventTitle-attendance.txt');
+    File file = File('${sanitizeFileName(eventTitle)}-attendance.txt');
     if (await file.exists()) {
       String content = await file.readAsString();
       List<String> sections = content.split('\n\n');
       List<String> attendees = sections[0].split('\n').skip(1).toList();
-      Map<String, bool> presence = {};
+      Map<String, AttendanceStatus> presence = {};
       sections[1].split('\n').skip(1).forEach((line) {
         List<String> parts = line.split(': ');
         if (parts.length == 2) {
-          presence[parts[0]] = parts[1] == 'true';
+          presence[parts[0]] = parts[1] == 'present'
+              ? AttendanceStatus.present
+              : AttendanceStatus.absent;
         }
       });
       return Attendance(
@@ -121,6 +120,10 @@ class Storage {
       );
     }
     return Attendance(eventTitle: eventTitle, attendees: [], presence: {});
+  }
+
+  String sanitizeFileName(String fileName) {
+    return fileName.replaceAll(RegExp(r'[<>:"/\\|?*]'), '_');
   }
 }
 
@@ -156,7 +159,8 @@ void main() async {
       print('Enter event description:');
       String description = stdin.readLineSync()!;
 
-      Event newEvent = Event(title: title, date: date, time: time, location: location, description: description);
+      Event newEvent = Event(
+          title: title, date: date, time: time, location: location, description: description);
 
       if (scheduler.hasConflict(newEvent)) {
         print('Conflict detected! Event overlaps with an existing event.');
@@ -183,28 +187,27 @@ void main() async {
       print('Enter the title of the event to edit:');
       String oldTitle = stdin.readLineSync()!;
       Event? eventToEdit = events.firstWhere(
-        (event) => event.title == oldTitle, 
-        orElse: () => Event(title: '', date: DateTime(0000), time: '', location: '', description: '')
-      );
+          (event) => event.title == oldTitle,
+          orElse: () => Event(title: '', date: DateTime(0000), time: '', location: '', description: ''));
 
       if (eventToEdit.title.isNotEmpty) {
-        print('Enter new title (leave blank to keep the same):');
+        print('Enter new title:');
         String title = stdin.readLineSync()!;
         if (title.isNotEmpty) eventToEdit.title = title;
 
-        print('Enter new date (YYYY-MM-DD, leave blank to keep the same):');
+        print('Enter new date (YYYY-MM-DD):');
         String dateStr = stdin.readLineSync()!;
         if (dateStr.isNotEmpty) eventToEdit.date = DateTime.parse(dateStr);
 
-        print('Enter new time (HH:MM, leave blank to keep the same):');
+        print('Enter new time (HH:MM):');
         String time = stdin.readLineSync()!;
         if (time.isNotEmpty) eventToEdit.time = time;
 
-        print('Enter new location (leave blank to keep the same):');
+        print('Enter new location:');
         String location = stdin.readLineSync()!;
         if (location.isNotEmpty) eventToEdit.location = location;
 
-        print('Enter new description (leave blank to keep the same):');
+        print('Enter new description:');
         String description = stdin.readLineSync()!;
         if (description.isNotEmpty) eventToEdit.description = description;
 
@@ -229,7 +232,7 @@ void main() async {
       Attendance attendance = await storage.loadAttendance(eventTitle);
       if (!attendance.attendees.contains(attendeeName)) {
         attendance.attendees.add(attendeeName);
-        attendance.presence[attendeeName] = false;
+        attendance.presence[attendeeName] = AttendanceStatus.absent;
         await storage.saveAttendance(eventTitle, attendance);
         print('Attendee $attendeeName registered for event $eventTitle.');
       } else {
@@ -242,7 +245,7 @@ void main() async {
       Attendance attendance = await storage.loadAttendance(eventTitle);
       print('Attendees for $eventTitle:');
       for (var attendee in attendance.attendees) {
-        String status = attendance.presence[attendee] == true ? 'Present' : 'Absent';
+        String status = attendance.presence[attendee] == AttendanceStatus.present ? 'Present' : 'Absent';
         print('$attendee: $status');
       }
     } else if (choice == '7') {
@@ -252,7 +255,9 @@ void main() async {
       String attendeeName = stdin.readLineSync()!;
       print('Mark as (present/absent):');
       String status = stdin.readLineSync()!;
-      bool isPresent = status.toLowerCase() == 'present';
+      AttendanceStatus isPresent = status.toLowerCase() == 'present'
+          ? AttendanceStatus.present
+          : AttendanceStatus.absent;
 
       Attendance attendance = await storage.loadAttendance(eventTitle);
       if (attendance.attendees.contains(attendeeName)) {
